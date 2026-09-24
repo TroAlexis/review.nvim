@@ -332,6 +332,13 @@ function M.setup_keymaps(tabpage)
   })
 end
 
+--- Clear review's keymaps from one buffer (it is shown outside the review now)
+---@param bufnr number
+function M.clear_buffer_keymaps(bufnr)
+  clear_buffer_keymaps(bufnr)
+  keymapped_buffers[bufnr] = nil
+end
+
 -- Clear keymaps from all tracked buffers
 function M.clear_keymaps()
   for bufnr in pairs(keymapped_buffers) do

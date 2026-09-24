@@ -33,13 +33,21 @@ local function make_readonly(bufnr)
   vim.api.nvim_set_option_value("readonly", true, { buf = bufnr })
 end
 
+---Put one buffer's modifiable/readonly back. Keeps the saved entry, so the
+---review can make it readonly again when the user returns to its tab.
+---@param bufnr number
+local function restore_buffer(bufnr)
+  local opts = saved_buf_options[bufnr]
+  if opts and vim.api.nvim_buf_is_valid(bufnr) then
+    vim.api.nvim_set_option_value("modifiable", opts.modifiable, { buf = bufnr })
+    vim.api.nvim_set_option_value("readonly", opts.readonly, { buf = bufnr })
+  end
+end
+
 ---Restore modifiable/readonly on every buffer make_readonly touched.
 function M.restore_buffer_options()
-  for bufnr, opts in pairs(saved_buf_options) do
-    if vim.api.nvim_buf_is_valid(bufnr) then
-      vim.api.nvim_set_option_value("modifiable", opts.modifiable, { buf = bufnr })
-      vim.api.nvim_set_option_value("readonly", opts.readonly, { buf = bufnr })
-    end
+  for bufnr in pairs(saved_buf_options) do
+    restore_buffer(bufnr)
   end
   saved_buf_options = {}
 end
@@ -325,10 +333,17 @@ function M.on_session_created(tabpage)
   vim.api.nvim_create_autocmd("BufEnter", {
     group = buf_augroup,
     callback = function()
+      local bufnr = vim.api.nvim_get_current_buf()
       if vim.api.nvim_get_current_tabpage() ~= current_tabpage then
+        -- A working-tree buffer opened in another tab (codediff's gf shows
+        -- the same buffer) must behave like a normal file there. Returning
+        -- to the review tab re-arms it via TabEnter and this autocmd.
+        if saved_buf_options[bufnr] then
+          restore_buffer(bufnr)
+          require("review.keymaps").clear_buffer_keymaps(bufnr)
+        end
         return
       end
-      local bufnr = vim.api.nvim_get_current_buf()
       if not M.diff_buffers(current_tabpage)[bufnr] then
         return
       end
