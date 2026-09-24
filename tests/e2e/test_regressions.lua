@@ -158,4 +158,60 @@ T["#40 popup title shows the configured submit key"] = function()
   expect_no_match(screen, "C-s: submit", true)
 end
 
+-- Review's per-buffer state (maps + readonly) on the buffer under the cursor.
+local REVIEW_STATE = [[(function()
+  return { maps = vim.fn.maparg("i", "n", false, true).buffer == 1, modifiable = vim.bo.modifiable }
+end)()]]
+
+T["closing another tab from inside the review leaves it armed"] = function()
+  open_review()
+  child.cmd("tabnew")
+  wait_for([[vim.fn.tabpagenr("$") == 3]], "scratch tab")
+  child.cmd("tabprevious")
+  wait_for(READY, "back in review")
+  vim.uv.sleep(300) -- past review's deferred TabEnter re-arm, so nothing else can rescue us
+  child.cmd("tabclose 3") -- no TabEnter fires for the review tab here
+  vim.uv.sleep(300)
+  eq(child.lua_get(REVIEW_STATE), { maps = true, modifiable = false })
+end
+
+T["Tab to the next file arms the new buffer even when git is slow"] = function()
+  open_review()
+  -- codediff records the new buffers only after `git show` returns. Make that
+  -- outlast review's 100ms deferred setup, as it does in any real repo.
+  child.lua([[
+    local system = vim.system
+    vim.system = function(cmd, opts, on_exit)
+      if not on_exit then return system(cmd, opts) end
+      return system(cmd, opts, function(...)
+        local args = { ... }
+        vim.defer_fn(function() on_exit(unpack(args)) end, 400)
+      end)
+    end
+  ]])
+  child.type_keys("<Tab>")
+  wait_for([[(select(2, require("codediff.ui.lifecycle").get_paths(vim.api.nvim_get_current_tabpage())) or {}).relative == "api.lua"]], "file switched", 10000)
+  vim.uv.sleep(300) -- nothing else fires: the cursor already sits in the new buffer
+  eq(child.lua_get(REVIEW_STATE), { maps = true, modifiable = false })
+  eq(child.lua_get([[(require("review.hooks").get_cursor_position())]]), "api.lua")
+end
+
+T["gf: the working-tree buffer is editable in the other tab and readonly back in the review"] = function()
+  child.cmd("edit " .. vim.fn.fnameescape(repo .. "/README.md")) -- a first tab for gf to land in
+  open_review()
+  local mod_buf = child.lua_get([[select(2, require("codediff.ui.lifecycle").get_buffers(vim.api.nvim_get_current_tabpage()))]])
+  eq(child.api.nvim_get_option_value("modifiable", { buf = mod_buf }), false)
+  child.type_keys("gf")
+  wait_for([[vim.fn.tabpagenr() == 1]], "landed in previous tab")
+  vim.uv.sleep(300)
+  eq(child.api.nvim_get_current_buf(), mod_buf) -- codediff shows the same buffer
+  eq(child.lua_get(REVIEW_STATE), { maps = false, modifiable = true })
+  -- `i` is insert mode again, not "add comment"
+  child.type_keys("i")
+  eq(child.fn.mode(), "i")
+  child.type_keys("<Esc>")
+  child.cmd("tabnext 2")
+  wait_for(READY, "review re-armed on return")
+end
+
 return T
