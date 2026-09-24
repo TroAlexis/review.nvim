@@ -307,11 +307,10 @@ function M.setup_keymaps(tabpage)
   end
   keymapped_buffers = {}
 
-  -- Set keymaps on both diff buffers. The current buffer may be the explorer
+  -- Set keymaps on the diff buffers. The current buffer may be the explorer
   -- (session setup runs before focus lands on the diff), so don't use that.
-  local orig_buf, mod_buf = lifecycle.get_buffers(tabpage)
-  for _, bufnr in ipairs({ orig_buf, mod_buf }) do
-    if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+  for bufnr in pairs(hooks.diff_buffers(tabpage)) do
+    if vim.api.nvim_buf_is_valid(bufnr) then
       set_buffer_keymaps(bufnr)
     end
   end
@@ -327,11 +326,17 @@ function M.setup_keymaps(tabpage)
       if not lifecycle.get_session(tabpage) then return end
       -- Only apply review keymaps to codediff diff buffers, not the explorer
       local bufnr = vim.api.nvim_get_current_buf()
-      local orig_buf, mod_buf = lifecycle.get_buffers(tabpage)
-      if bufnr ~= orig_buf and bufnr ~= mod_buf then return end
+      if not hooks.diff_buffers(tabpage)[bufnr] then return end
       set_buffer_keymaps(bufnr)
     end,
   })
+end
+
+--- Clear review's keymaps from one buffer (it is shown outside the review now)
+---@param bufnr number
+function M.clear_buffer_keymaps(bufnr)
+  clear_buffer_keymaps(bufnr)
+  keymapped_buffers[bufnr] = nil
 end
 
 -- Clear keymaps from all tracked buffers

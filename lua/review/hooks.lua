@@ -33,15 +33,45 @@ local function make_readonly(bufnr)
   vim.api.nvim_set_option_value("readonly", true, { buf = bufnr })
 end
 
+---Put one buffer's modifiable/readonly back. Keeps the saved entry, so the
+---review can make it readonly again when the user returns to its tab.
+---@param bufnr number
+local function restore_buffer(bufnr)
+  local opts = saved_buf_options[bufnr]
+  if opts and vim.api.nvim_buf_is_valid(bufnr) then
+    vim.api.nvim_set_option_value("modifiable", opts.modifiable, { buf = bufnr })
+    vim.api.nvim_set_option_value("readonly", opts.readonly, { buf = bufnr })
+  end
+end
+
 ---Restore modifiable/readonly on every buffer make_readonly touched.
 function M.restore_buffer_options()
-  for bufnr, opts in pairs(saved_buf_options) do
-    if vim.api.nvim_buf_is_valid(bufnr) then
-      vim.api.nvim_set_option_value("modifiable", opts.modifiable, { buf = bufnr })
-      vim.api.nvim_set_option_value("readonly", opts.readonly, { buf = bufnr })
-    end
+  for bufnr in pairs(saved_buf_options) do
+    restore_buffer(bufnr)
   end
   saved_buf_options = {}
+end
+
+---Buffers the review should treat as diff panes: the ones codediff's session
+---records, plus whatever its diff windows currently show. On a file switch
+---codediff puts the new buffer in the window first and updates the session
+---only after an async fetch, so going by session buffers alone misses it.
+---@param tabpage number
+---@return table<number, boolean>
+function M.diff_buffers(tabpage)
+  local lifecycle = require("codediff.ui.lifecycle")
+  local bufs = {}
+  local orig_buf, mod_buf = lifecycle.get_buffers(tabpage)
+  for _, bufnr in ipairs({ orig_buf, mod_buf }) do
+    bufs[bufnr] = true
+  end
+  local orig_win, mod_win = lifecycle.get_windows(tabpage)
+  for _, win in ipairs({ orig_win, mod_win }) do
+    if win and vim.api.nvim_win_is_valid(win) then
+      bufs[vim.api.nvim_win_get_buf(win)] = true
+    end
+  end
+  return bufs
 end
 
 ---Normalize a codediff path value to a plain string.
@@ -298,18 +328,27 @@ function M.on_session_created(tabpage)
   end
   buf_augroup = vim.api.nvim_create_augroup("review_buf_marks", { clear = true })
 
-  -- Set up BufEnter autocmd to render marks when entering codediff buffers
-  -- This ensures marks are rendered even if buffers weren't ready initially
+  -- Entering a diff pane: make sure it is readonly and its marks are drawn.
+  -- Covers buffers codediff swaps in after the deferred setup above ran.
   vim.api.nvim_create_autocmd("BufEnter", {
     group = buf_augroup,
     callback = function()
+      local bufnr = vim.api.nvim_get_current_buf()
       if vim.api.nvim_get_current_tabpage() ~= current_tabpage then
+        -- A working-tree buffer opened in another tab (codediff's gf shows
+        -- the same buffer) must behave like a normal file there. Returning
+        -- to the review tab re-arms it via TabEnter and this autocmd.
+        if saved_buf_options[bufnr] then
+          restore_buffer(bufnr)
+          require("review.keymaps").clear_buffer_keymaps(bufnr)
+        end
         return
       end
-      local bufnr = vim.api.nvim_get_current_buf()
-      local ob, mb = lifecycle.get_buffers(current_tabpage)
-      if bufnr ~= ob and bufnr ~= mb then
+      if not M.diff_buffers(current_tabpage)[bufnr] then
         return
+      end
+      if config.get().codediff.readonly then
+        make_readonly(bufnr)
       end
       marks.refresh()
     end,
