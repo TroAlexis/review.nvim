@@ -330,7 +330,8 @@ function M.on_session_created(tabpage)
 
   -- Entering a diff pane: make sure it is readonly and its marks are drawn.
   -- Covers buffers codediff swaps in after the deferred setup above ran.
-  vim.api.nvim_create_autocmd("BufEnter", {
+  -- TabEnter as well: a tab switch onto the same buffer fires no BufEnter.
+  vim.api.nvim_create_autocmd({ "BufEnter", "TabEnter" }, {
     group = buf_augroup,
     callback = function()
       local bufnr = vim.api.nvim_get_current_buf()
