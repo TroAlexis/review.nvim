@@ -33,9 +33,16 @@ function M.setup(opts)
     end,
   })
 
+  -- Only the review's own tab closing ends the session. TabClosed fires for
+  -- every tab (:tabclose N, a plugin's scratch tab, the tab gf jumped to), and
+  -- tearing down then would strip the keymaps from a review that is still open.
   vim.api.nvim_create_autocmd("TabClosed", {
     group = augroup,
     callback = function()
+      local review_tab = hooks.get_current_tabpage()
+      if review_tab and vim.api.nvim_tabpage_is_valid(review_tab) then
+        return
+      end
       hooks.on_session_closed()
     end,
   })
