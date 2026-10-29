@@ -214,4 +214,35 @@ T["gf: the working-tree buffer is editable in the other tab and readonly back in
   wait_for(READY, "review re-armed on return")
 end
 
+-- Edit mode (R) on a git revision pane: codediff rewrites and re-locks that
+-- buffer on its refresh after the first change, so review must not pretend it
+-- is editable. A working-tree pane really is.
+local MOD_LINES = [[vim.api.nvim_buf_line_count(select(2, require("codediff.ui.lifecycle").get_buffers(vim.api.nvim_get_current_tabpage())))]]
+
+T["R keeps a revision buffer read-only instead of unlocking it for one edit"] = function()
+  E.git(repo, "commit", "-qam", "change")
+  child.cmd("Review commits HEAD")
+  wait_for(READY, "review ready", 15000)
+  eq(child.lua_get([[vim.bo.buftype ~= ""]]), true) -- codediff:// pane, not a file
+  local lines = child.lua_get(MOD_LINES)
+  child.type_keys("R")
+  wait_for([[vim.fn.maparg("i", "n") == ""]], "edit-mode keymaps")
+  eq(child.lua_get([[vim.bo.modifiable]]), false)
+  pcall(child.type_keys, "dd") -- E21: refused, which is the point
+  vim.uv.sleep(800) -- past codediff's refresh
+  eq(child.lua_get(MOD_LINES), lines)
+end
+
+T["R lets a working-tree buffer take more than one edit"] = function()
+  open_review()
+  local lines = child.lua_get(MOD_LINES)
+  child.type_keys("R")
+  wait_for([[vim.fn.maparg("i", "n") == ""]], "edit-mode keymaps")
+  child.type_keys("dd")
+  vim.uv.sleep(800) -- past codediff's refresh
+  child.type_keys("dd")
+  eq(child.lua_get(MOD_LINES), lines - 2)
+  eq(child.lua_get([[vim.bo.modifiable]]), true)
+end
+
 return T

@@ -363,16 +363,19 @@ function M.toggle_readonly()
     return
   end
 
-  local orig_buf, mod_buf = lifecycle.get_buffers(tabpage)
-
-  -- Update buffer readonly state
-  if orig_buf and vim.api.nvim_buf_is_valid(orig_buf) then
-    vim.api.nvim_set_option_value("modifiable", not cfg.codediff.readonly, { buf = orig_buf })
-    vim.api.nvim_set_option_value("readonly", cfg.codediff.readonly, { buf = orig_buf })
-  end
-  if mod_buf and vim.api.nvim_buf_is_valid(mod_buf) then
-    vim.api.nvim_set_option_value("modifiable", not cfg.codediff.readonly, { buf = mod_buf })
-    vim.api.nvim_set_option_value("readonly", cfg.codediff.readonly, { buf = mod_buf })
+  -- Update buffer readonly state. Only a working-tree file can be edited: a
+  -- git revision pane (codediff://) is rewritten from git and locked again by
+  -- codediff's refresh after the first change, so leave it alone.
+  local kept_readonly = false
+  for _, bufnr in pairs({ lifecycle.get_buffers(tabpage) }) do
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      if vim.bo[bufnr].buftype == "" then
+        vim.api.nvim_set_option_value("modifiable", not cfg.codediff.readonly, { buf = bufnr })
+        vim.api.nvim_set_option_value("readonly", cfg.codediff.readonly, { buf = bufnr })
+      else
+        kept_readonly = true
+      end
+    end
   end
 
   -- Re-setup keymaps with new readonly state
@@ -380,7 +383,11 @@ function M.toggle_readonly()
   keymaps.setup_keymaps(tabpage)
 
   local mode = cfg.codediff.readonly and "readonly" or "edit"
-  vim.notify("Switched to " .. mode .. " mode", vim.log.levels.INFO, { title = "review.nvim" })
+  local msg = "Switched to " .. mode .. " mode"
+  if kept_readonly and not cfg.codediff.readonly then
+    msg = msg .. " (git revision buffers stay read-only)"
+  end
+  vim.notify(msg, vim.log.levels.INFO, { title = "review.nvim" })
 end
 
 return M
