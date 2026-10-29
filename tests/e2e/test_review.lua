@@ -274,4 +274,21 @@ T["exports to clipboard and closes"] = function()
   expect_match(table.concat(vim.fn.readfile(archived[1]), "\n"), "pcall around decode", true)
 end
 
+-- git difftool/mergetool start `nvim +"CodeDiff --exit-on-close ..."`; review
+-- owns q on every codediff tab, so it has to honour that and quit Neovim.
+T["q quits Neovim in a codediff session opened with --exit-on-close"] = function()
+  child.cmd("CodeDiff --exit-on-close")
+  -- not READY: a plain CodeDiff pane is the editable working-tree file
+  wait_for([[vim.fn.maparg("q", "n", false, true).desc == "Close"]], "review keymaps", 15000)
+  pcall(child.type_keys, "q") -- the RPC channel may close mid-call
+  -- child.is_running() stays true after the child exits; a dead channel does not
+  local deadline = vim.uv.hrtime() + 5000 * 1e6
+  local alive = true
+  while alive and vim.uv.hrtime() < deadline do
+    alive = pcall(child.lua_get, "1")
+    vim.uv.sleep(50)
+  end
+  eq(alive, false)
+end
+
 return T
