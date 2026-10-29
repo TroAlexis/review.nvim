@@ -302,6 +302,18 @@ function M.close()
   local markdown, count = export.deliver()
   local message = markdown and export.delivered_message(count) or nil
 
+  -- Opened as `nvim +"CodeDiff --exit-on-close ..."` (git difftool/mergetool):
+  -- let codediff quit Neovim as its own close would, not leave an empty editor.
+  local ok, lifecycle = pcall(require, "codediff.ui.lifecycle")
+  local sess = ok and lifecycle.get_session(vim.api.nvim_get_current_tabpage())
+  if sess and sess.exit_on_close and lifecycle.close then
+    if markdown and config.get().export.clear_on_close ~= false then
+      store.archive_and_clear()
+    end
+    lifecycle.close()
+    return
+  end
+
   vim.cmd("tabclose")
   hooks.on_session_closed()
 
